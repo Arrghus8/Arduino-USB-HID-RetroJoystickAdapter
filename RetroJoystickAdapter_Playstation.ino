@@ -1,16 +1,14 @@
 
-// 5V (red)
+// 3.3V (red)
 // GND (black)
-#define DATA1 2 // (brown)
-#define CMD1 3 // (orange)
+#define CMD 3 // (orange)
+#define CLK 5 // (blue)
+
+#define DATA1 2 // (brown) 
 #define ATT1 4 // (yellow)
-#define CLK1 5 // (blue)
 
-/*#define DATA2 6
-#define CMD2 7
+#define DATA2 6
 #define ATT2 8
-#define CLK2 9 */
-
 
 #include "HID.h"
 
@@ -28,8 +26,6 @@
 
 #define JOYSTICK_REPORT_ID  0x03
 #define JOYSTICK2_REPORT_ID 0x04
-#define JOYSTICK3_REPORT_ID 0x05
-#define JOYSTICK4_REPORT_ID 0x06
 
 #define JOYSTICK_STATE_SIZE 6
 
@@ -79,8 +75,6 @@
 static const uint8_t hidReportDescriptor[] PROGMEM = {
   HIDDESC_MACRO(JOYSTICK_REPORT_ID),
   HIDDESC_MACRO(JOYSTICK2_REPORT_ID),
-  HIDDESC_MACRO(JOYSTICK3_REPORT_ID),
-  HIDDESC_MACRO(JOYSTICK4_REPORT_ID)
 };
 
 
@@ -95,6 +89,7 @@ private:
 public:
   uint8_t type;
   uint8_t data[JOYSTICK_STATE_SIZE];
+  uint8_t dataIn;
 
   Joystick_(uint8_t initJoystickId, uint8_t initReportId) {
     // Setup HID report structure
@@ -147,58 +142,47 @@ public:
 };
 
 
-Joystick_ Joystick[4] =
+Joystick_ Joystick[2] =
 {
     Joystick_(0, JOYSTICK_REPORT_ID),
     Joystick_(1, JOYSTICK2_REPORT_ID),
-    Joystick_(2, JOYSTICK3_REPORT_ID),
-    Joystick_(3, JOYSTICK4_REPORT_ID)
 };
 
 //================================================================================
 //================================================================================
 
+void shift(uint8_t _dataOut) {
+  uint8_t _delay = 6; 
 
+  Joystick[0].dataIn = 0;
+  Joystick[1].dataIn = 0;
 
-
-
-uint8_t shift(uint8_t _dataOut) // Does the actual shifting, both in and out simultaneously
-{
-  uint8_t _temp = 0;
-  uint8_t _dataIn = 0;
-  uint8_t _delay = 6; //2 unstable; //clock 250kHz
-
-  delayMicroseconds(100); //max acknowledge waiting time 100us
-  for (uint8_t _i = 0; _i <= 7; _i++) {
-    
-    if ( _dataOut & (1 << _i) ) // write bit
-      digitalWrite(CMD1, HIGH);
+  for (uint8_t _i = 0; _i < 8; _i++) {
+    if (_dataOut & (1 << _i)) 
+      digitalWrite(CMD, HIGH);
     else 
-      digitalWrite(CMD1, LOW);
-    
-    digitalWrite(CLK1, LOW); // read bit
-    delayMicroseconds(_delay);
-    _temp = digitalRead(DATA1);
-    if (_temp) {
-      _dataIn = _dataIn | (B00000001 << _i);
-    }
+      digitalWrite(CMD, LOW);
 
-    digitalWrite(CLK1, HIGH);
+    digitalWrite(CLK, LOW);
+    delayMicroseconds(_delay);
+
+    if (digitalRead(DATA1)) Joystick[0].dataIn |= (1 << _i);
+    if (digitalRead(DATA2)) Joystick[1].dataIn |= (1 << _i);
+
+    digitalWrite(CLK, HIGH);
     delayMicroseconds(_delay);
   }
-  return _dataIn;
 }
 
 void setup() {
-  pinMode(DATA1, INPUT_PULLUP);
-  pinMode(CMD1, OUTPUT);
-  pinMode(ATT1, OUTPUT);
-  pinMode(CLK1, OUTPUT);
+  pinMode(CMD, OUTPUT);
+  pinMode(CLK, OUTPUT);
 
-  /*pinMode(DATA2, INPUT_PULLUP);
-  pinMode(CMD2, OUTPUT);
+  pinMode(DATA1, INPUT_PULLUP);
+  pinMode(ATT1, OUTPUT);
+
+  pinMode(DATA2, INPUT_PULLUP);
   pinMode(ATT2, OUTPUT);
-  pinMode(CLK2, OUTPUT);*/
   
   #ifdef DEBUG
   Serial.begin(115200);
@@ -208,50 +192,41 @@ void setup() {
 
 void loop() {
   // http://problemkaputt.de/psx-spx.htm#controllerandmemorycardsignals
-  uint8_t head, padding, multitap;
-  #ifdef DEBUG
-  uint8_t data[100];
-  #endif
-
-  // first: read gamepad normally
+  
   digitalWrite(ATT1, LOW);
-  //digitalWrite(ATT2, LOW);
-  head = shift(0x01);
-  Joystick[0].type = shift(0x42);
-  padding = shift(0x01); //read multitap in next command
-  Joystick[0].data[0] = ~shift(0x00); //buttons
-  Joystick[0].data[1] = ~shift(0x00); //buttons
-  Joystick[0].data[2] = shift(0x00); //right analog
-  Joystick[0].data[3] = shift(0x00); //right analog
-  Joystick[0].data[4] = shift(0x00); //left analog
-  Joystick[0].data[5] = shift(0x00); //left analog
-  digitalWrite(ATT1, HIGH);
-  //digitalWrite(ATT2, HIGH);
+  digitalWrite(ATT2, LOW);
 
-  //delay(100);
+  shift(0x01); // Controller Access
+  shift(0x42); // Receive ID bit0..7
+  Joystick[0].type = Joystick[0].dataIn;
+  Joystick[1].type = Joystick[1].dataIn;
+  shift(0x00); // Receive ID bit8..15
 
-  // second: check and read multitap
-  digitalWrite(ATT1, LOW);
-  head = shift(0x01);
-  multitap = shift(0x42);
-  padding = shift(0x00); //next time normal read
-  if (multitap == 0x80) {
-    for (uint8_t i = 0; i < 4; i++) {
-      Joystick[i].type = shift(0x00);
-      padding = shift(0x00);
-      Joystick[i].data[0] = ~shift(0x00); //buttons
-      Joystick[i].data[1] = ~shift(0x00); //buttons
-      Joystick[i].data[2] = shift(0x00); //right analog
-      Joystick[i].data[3] = shift(0x00); //right analog
-      Joystick[i].data[4] = shift(0x00); //left analog
-      Joystick[i].data[5] = shift(0x00); //left analog
+  /*
+  Receive controller state:
+  i=0: Receive Digital Switches bit0..7  (inverted)
+  i=1: Receive Digital Switchis bit8..15 (inverted)
+  i=2: Receive Analog Input 0 (left analog)
+  i=3: Receive Analog Input 1 (left analog)
+  i=4: Receive Analog Input 2 (right analog)
+  i=5: Receive Analog Input 3 (right analog)
+  */
+  for (uint8_t i = 0; i < 6; i++) {
+    shift(0x00);
+    if (i < 2) {
+      Joystick[0].data[i] = ~Joystick[0].dataIn;
+      Joystick[1].data[i] = ~Joystick[1].dataIn;
+    } else {
+      Joystick[0].data[i] = Joystick[0].dataIn; 
+      Joystick[1].data[i] = Joystick[1].dataIn;
     }
   }
+
   digitalWrite(ATT1, HIGH);
+  digitalWrite(ATT2, HIGH);
 
   #ifdef DEBUG
-  for (uint8_t i = 0; i < 4; i++) {
-    Serial.print(" multitap: "); Serial.println(multitap, HEX);
+  for (uint8_t i = 0; i < 2; i++) {
     Serial.print(" type: 0x"); Serial.print(Joystick[i].type, HEX);
     Serial.print(" data: 0x"); Serial.print(Joystick[i].data[0], HEX);
     Serial.print(" 0x"); Serial.print(Joystick[i].data[1], HEX);
@@ -261,26 +236,12 @@ void loop() {
     Serial.print(" 0x"); Serial.print(Joystick[i].data[5], HEX);
     Serial.println();
   }
-  /*Serial.print(" type: 0x"); Serial.print(Joystick[0].type, HEX);
-  Serial.print(" data: 0x"); Serial.print(Joystick[0].data[0], HEX);
-  Serial.print(" 0x"); Serial.print(Joystick[0].data[1], HEX);
-  Serial.print(" 0x"); Serial.print(Joystick[0].data[2], HEX);
-  Serial.print(" 0x"); Serial.print(Joystick[0].data[3], HEX);
-  Serial.print(" 0x"); Serial.print(Joystick[0].data[4], HEX);
-  Serial.print(" 0x"); Serial.print(Joystick[0].data[5], HEX);
-  Serial.println();*/
   Serial.flush();
   #endif
 
   Joystick[0].updateState();
   Joystick[1].updateState();
-  Joystick[2].updateState();
-  Joystick[3].updateState();
   Joystick[0].sendState();
-  Joystick[1].sendState();
-  Joystick[2].sendState();
-  Joystick[3].sendState();  
+  Joystick[1].sendState(); 
   delayMicroseconds(1000);
-
-
 }
