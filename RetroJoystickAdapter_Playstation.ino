@@ -1,33 +1,22 @@
+#define CMD 3
+#define CLK 5
 
-// 3.3V (red)
-// GND (black)
-#define CMD 3 // (orange)
-#define CLK 5 // (blue)
-
-#define DATA1 2 // (brown) 
-#define ATT1 4 // (yellow)
+#define DATA1 2 
+#define ATT1 4
 
 #define DATA2 6
 #define ATT2 8
 
 #include "HID.h"
 
-#if ARDUINO < 10606
-#error The Joystick2 library requires Arduino IDE 1.6.6 or greater. Please update your IDE.
-#endif
-
-#if !defined(USBCON)
-#error The Joystick2 library can only be used with a USB MCU (e.g. Arduino Leonardo, Arduino Micro, etc.).
-#endif
-
-#if !defined(_USING_HID)
-#error "legacy HID core (non pluggable)"
-#endif
-
-#define JOYSTICK_REPORT_ID  0x03
+#define NUM_PADS 2
+#define JOYSTICK1_REPORT_ID  0x03
 #define JOYSTICK2_REPORT_ID 0x04
+//#define JOYSTICK3_REPORT_ID 0x05
 
 #define JOYSTICK_STATE_SIZE 6
+
+#define delay 6
 
 //#define DEBUG
 
@@ -73,8 +62,9 @@
 
 
 static const uint8_t hidReportDescriptor[] PROGMEM = {
-  HIDDESC_MACRO(JOYSTICK_REPORT_ID),
+  HIDDESC_MACRO(JOYSTICK1_REPORT_ID),
   HIDDESC_MACRO(JOYSTICK2_REPORT_ID),
+  //HIDDESC_MACRO(JOYSTICK3_REPORT_ID),
 };
 
 
@@ -90,7 +80,10 @@ public:
   uint8_t type;
   uint8_t data[JOYSTICK_STATE_SIZE];
   uint8_t dataIn;
-
+  bool connected = false;
+  uint8_t DATA;
+  uint8_t ATT;
+  
   Joystick_(uint8_t initJoystickId, uint8_t initReportId) {
     // Setup HID report structure
     static bool usbSetup = false;
@@ -144,18 +137,16 @@ public:
 
 Joystick_ Joystick[2] =
 {
-    Joystick_(0, JOYSTICK_REPORT_ID),
+    Joystick_(0, JOYSTICK1_REPORT_ID),
     Joystick_(1, JOYSTICK2_REPORT_ID),
+    //Joystick_(2, JOYSTICK3_REPORT_ID),
 };
 
 //================================================================================
 //================================================================================
 
-void shift(uint8_t _dataOut) {
-  uint8_t _delay = 6; 
-
-  Joystick[0].dataIn = 0;
-  Joystick[1].dataIn = 0;
+void shift(Joystick_& joystick, uint8_t _dataOut) {
+  joystick.dataIn = 0;
 
   for (uint8_t _i = 0; _i < 8; _i++) {
     if (_dataOut & (1 << _i)) 
@@ -164,69 +155,152 @@ void shift(uint8_t _dataOut) {
       digitalWrite(CMD, LOW);
 
     digitalWrite(CLK, LOW);
-    delayMicroseconds(_delay);
+    delayMicroseconds(delay);
 
-    if (digitalRead(DATA1)) Joystick[0].dataIn |= (1 << _i);
-    if (digitalRead(DATA2)) Joystick[1].dataIn |= (1 << _i);
+    if (digitalRead(joystick.DATA)) joystick.dataIn |= (1 << _i);
 
     digitalWrite(CLK, HIGH);
-    delayMicroseconds(_delay);
+    delayMicroseconds(delay);
   }
+}
+
+void parallel_shift(uint8_t _dataOut) {
+  for (uint8_t _i = 0; _i < NUM_PADS; _i++) {
+    Joystick[_i].dataIn = 0;
+  }
+
+  for (uint8_t _j = 0; _j < 8; _j++) {
+    if (_dataOut & (1 << _j)) 
+      digitalWrite(CMD, HIGH);
+    else 
+      digitalWrite(CMD, LOW);
+
+    digitalWrite(CLK, LOW);
+    delayMicroseconds(delay);
+
+    for (uint8_t _i = 0; _i < NUM_PADS; _i++) {
+      if (digitalRead(Joystick[_i].DATA)) Joystick[_i].dataIn |= (1 << _j);
+    }
+
+    digitalWrite(CLK, HIGH);
+    delayMicroseconds(delay);
+  }
+}
+
+void enable_analog(Joystick_& joystick) {
+  // Additional delays are necessary for some controllers(e.g. SCPH-110, Revision H)
+  // These delays will only occur when a new controller is detected
+
+  // Enable config mode
+  digitalWrite(joystick.ATT, LOW); 
+  delayMicroseconds(100);
+  shift(joystick, 0x01);  delayMicroseconds(40);
+  shift(joystick, 0x43);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x01);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);
+  digitalWrite(joystick.ATT, HIGH); 
+  delayMicroseconds(1000);
+
+  // Enable analog mode
+  digitalWrite(joystick.ATT, LOW); 
+  delayMicroseconds(100);
+  shift(joystick, 0x01);  delayMicroseconds(40);
+  shift(joystick, 0x44);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x01);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);
+  digitalWrite(joystick.ATT, HIGH); 
+  delayMicroseconds(1000);
+
+  // Disable config
+  digitalWrite(joystick.ATT, LOW); 
+  delayMicroseconds(100);
+  shift(joystick, 0x01);  delayMicroseconds(40);
+  shift(joystick, 0x43);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x00);  delayMicroseconds(40);
+  shift(joystick, 0x5A);  delayMicroseconds(40);
+  shift(joystick, 0x5A);  delayMicroseconds(40);
+  shift(joystick, 0x5A);  delayMicroseconds(40);
+  shift(joystick, 0x5A);  delayMicroseconds(40);
+  shift(joystick, 0x5A);
+  digitalWrite(joystick.ATT, HIGH); 
+  delayMicroseconds(1000);
 }
 
 void setup() {
   pinMode(CMD, OUTPUT);
   pinMode(CLK, OUTPUT);
-
-  pinMode(DATA1, INPUT_PULLUP);
-  pinMode(ATT1, OUTPUT);
-
-  pinMode(DATA2, INPUT_PULLUP);
-  pinMode(ATT2, OUTPUT);
   
+  Joystick[0].DATA = DATA1;
+  Joystick[0].ATT = ATT1;
+
+  Joystick[1].DATA = DATA2;
+  Joystick[1].ATT = ATT2;
+
+  //Joystick[2].DATA = DATA3;
+  //Joystick[2].ATT = ATT3;
+
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    pinMode(Joystick[i].DATA, INPUT_PULLUP);
+    pinMode(Joystick[i].ATT, OUTPUT);
+  }
+
   #ifdef DEBUG
   Serial.begin(115200);
   #endif
-
 }
 
 void loop() {
   // http://problemkaputt.de/psx-spx.htm#controllerandmemorycardsignals
   
-  digitalWrite(ATT1, LOW);
-  digitalWrite(ATT2, LOW);
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    digitalWrite(Joystick[i].ATT, LOW);
+  }
 
-  shift(0x01); // Controller Access
-  shift(0x42); // Receive ID bit0..7
-  Joystick[0].type = Joystick[0].dataIn;
-  Joystick[1].type = Joystick[1].dataIn;
-  shift(0x00); // Receive ID bit8..15
+  parallel_shift(0x01); // Controller Access
+  parallel_shift(0x42); // Receive ID bit0..7
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    Joystick[i].type = Joystick[i].dataIn;
+  }
+  parallel_shift(0x00); // Receive ID bit8..15
 
-  /*
-  Receive controller state:
-  i=0: Receive Digital Switches bit0..7  (inverted)
-  i=1: Receive Digital Switchis bit8..15 (inverted)
-  i=2: Receive Analog Input 0 (left analog)
-  i=3: Receive Analog Input 1 (left analog)
-  i=4: Receive Analog Input 2 (right analog)
-  i=5: Receive Analog Input 3 (right analog)
-  */
-  for (uint8_t i = 0; i < 6; i++) {
-    shift(0x00);
-    if (i < 2) {
-      Joystick[0].data[i] = ~Joystick[0].dataIn;
-      Joystick[1].data[i] = ~Joystick[1].dataIn;
-    } else {
-      Joystick[0].data[i] = Joystick[0].dataIn; 
-      Joystick[1].data[i] = Joystick[1].dataIn;
+  for (uint8_t j = 0; j < 6; j++) {                 // Receive controller state:
+    parallel_shift(0x00);                           // j=0: Receive Digital Switches bit0..7  (buttons, inverted)
+    for (uint8_t i = 0; i < NUM_PADS; i++) {        // j=1: Receive Digital Switchis bit8..15 (buttons, inverted)
+      if (j < 2) {                                  // j=2: Receive Analog Input 0 (left analog)
+        Joystick[i].data[j] = ~Joystick[i].dataIn;  // j=3: Receive Analog Input 1 (left analog)
+      } else {                                      // j=4: Receive Analog Input 2 (right analog)
+        Joystick[i].data[j] = Joystick[i].dataIn;   // j=5: Receive Analog Input 3 (right analog)
+      }
     }
   }
 
-  digitalWrite(ATT1, HIGH);
-  digitalWrite(ATT2, HIGH);
+  for (uint8_t i = 0; i < NUM_PADS; i++) { 
+    digitalWrite(Joystick[i].ATT, HIGH);
+  }
+
+  // Check if controller has just been connected (i.e. type not 0xFF)
+  // If so, enable analog mode
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    if ((!Joystick[i].connected) && (Joystick[i].type != 0xFF)) {
+      enable_analog(Joystick[i]);
+    }
+    Joystick[i].connected = (Joystick[i].type != 0xFF);
+  }
 
   #ifdef DEBUG
-  for (uint8_t i = 0; i < 2; i++) {
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    Serial.print(" Pad "); Serial.print(i+1); Serial.print(":");
     Serial.print(" type: 0x"); Serial.print(Joystick[i].type, HEX);
     Serial.print(" data: 0x"); Serial.print(Joystick[i].data[0], HEX);
     Serial.print(" 0x"); Serial.print(Joystick[i].data[1], HEX);
@@ -234,14 +308,14 @@ void loop() {
     Serial.print(" 0x"); Serial.print(Joystick[i].data[3], HEX);
     Serial.print(" 0x"); Serial.print(Joystick[i].data[4], HEX);
     Serial.print(" 0x"); Serial.print(Joystick[i].data[5], HEX);
-    Serial.println();
   }
+  Serial.println();
   Serial.flush();
   #endif
 
-  Joystick[0].updateState();
-  Joystick[1].updateState();
-  Joystick[0].sendState();
-  Joystick[1].sendState(); 
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    Joystick[i].updateState();
+    Joystick[i].sendState();
+  }
   delayMicroseconds(1000);
 }
