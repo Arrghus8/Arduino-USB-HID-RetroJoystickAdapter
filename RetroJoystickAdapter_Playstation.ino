@@ -1,11 +1,14 @@
-#define CMD 3
-#define CLK 5
+#define CMD 2
+#define CLK 3
 
-#define DATA1 2 
-#define ATT1 4
+#define DATA1 4 
+#define ATT1 5
 
 #define DATA2 6
-#define ATT2 8
+#define ATT2 7
+
+//#define DATA3 8
+//#define ATT3  9
 
 #include "HID.h"
 
@@ -148,8 +151,8 @@ Joystick_ Joystick[2] =
 void shift(Joystick_& joystick, uint8_t _dataOut) {
   joystick.dataIn = 0;
 
-  for (uint8_t _i = 0; _i < 8; _i++) {
-    if (_dataOut & (1 << _i)) 
+  for (uint8_t i = 0; i < 8; i++) {
+    if (_dataOut & (1 << i)) 
       digitalWrite(CMD, HIGH);
     else 
       digitalWrite(CMD, LOW);
@@ -157,7 +160,7 @@ void shift(Joystick_& joystick, uint8_t _dataOut) {
     digitalWrite(CLK, LOW);
     delayMicroseconds(delay);
 
-    if (digitalRead(joystick.DATA)) joystick.dataIn |= (1 << _i);
+    if (digitalRead(joystick.DATA)) joystick.dataIn |= (1 << i);
 
     digitalWrite(CLK, HIGH);
     delayMicroseconds(delay);
@@ -165,12 +168,12 @@ void shift(Joystick_& joystick, uint8_t _dataOut) {
 }
 
 void parallel_shift(uint8_t _dataOut) {
-  for (uint8_t _i = 0; _i < NUM_PADS; _i++) {
-    Joystick[_i].dataIn = 0;
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    Joystick[i].dataIn = 0;
   }
 
-  for (uint8_t _j = 0; _j < 8; _j++) {
-    if (_dataOut & (1 << _j)) 
+  for (uint8_t j = 0; j < 8; j++) {
+    if (_dataOut & (1 << j)) 
       digitalWrite(CMD, HIGH);
     else 
       digitalWrite(CMD, LOW);
@@ -178,8 +181,8 @@ void parallel_shift(uint8_t _dataOut) {
     digitalWrite(CLK, LOW);
     delayMicroseconds(delay);
 
-    for (uint8_t _i = 0; _i < NUM_PADS; _i++) {
-      if (digitalRead(Joystick[_i].DATA)) Joystick[_i].dataIn |= (1 << _j);
+    for (uint8_t i = 0; i < NUM_PADS; i++) {
+      if (digitalRead(Joystick[i].DATA)) Joystick[i].dataIn |= (1 << j);
     }
 
     digitalWrite(CLK, HIGH);
@@ -274,14 +277,17 @@ void loop() {
   }
   parallel_shift(0x00); // Receive ID bit8..15
 
-  for (uint8_t j = 0; j < 6; j++) {                 // Receive controller state:
-    parallel_shift(0x00);                           // j=0: Receive Digital Switches bit0..7  (buttons, inverted)
-    for (uint8_t i = 0; i < NUM_PADS; i++) {        // j=1: Receive Digital Switchis bit8..15 (buttons, inverted)
-      if (j < 2) {                                  // j=2: Receive Analog Input 0 (left analog)
-        Joystick[i].data[j] = ~Joystick[i].dataIn;  // j=3: Receive Analog Input 1 (left analog)
-      } else {                                      // j=4: Receive Analog Input 2 (right analog)
-        Joystick[i].data[j] = Joystick[i].dataIn;   // j=5: Receive Analog Input 3 (right analog)
-      }
+  // Receive controller state:
+  // j=0: Receive Digital Switches bit0..7  (buttons, inverted)
+  // j=1: Receive Digital Switchis bit8..15 (buttons, inverted)
+  // j=2: Receive Analog Input 0 (right analog X)
+  // j=3: Receive Analog Input 1 (right analog Y)
+  // j=4: Receive Analog Input 2 (left analog X)
+  // j=5: Receive Analog Input 3 (left analog Y)
+  for (uint8_t j = 0; j < 6; j++) {                 
+    parallel_shift(0x00);                           
+    for (uint8_t i = 0; i < NUM_PADS; i++) {        
+      Joystick[i].data[j] = (j < 2) ? ~Joystick[i].dataIn : Joystick[i].dataIn;
     }
   }
 
@@ -302,12 +308,10 @@ void loop() {
   for (uint8_t i = 0; i < NUM_PADS; i++) {
     Serial.print(" Pad "); Serial.print(i+1); Serial.print(":");
     Serial.print(" type: 0x"); Serial.print(Joystick[i].type, HEX);
-    Serial.print(" data: 0x"); Serial.print(Joystick[i].data[0], HEX);
-    Serial.print(" 0x"); Serial.print(Joystick[i].data[1], HEX);
-    Serial.print(" 0x"); Serial.print(Joystick[i].data[2], HEX);
-    Serial.print(" 0x"); Serial.print(Joystick[i].data[3], HEX);
-    Serial.print(" 0x"); Serial.print(Joystick[i].data[4], HEX);
-    Serial.print(" 0x"); Serial.print(Joystick[i].data[5], HEX);
+    Serial.print(" data:"); 
+    for (uint8_t j = 0; j < 6; j++) {
+        Serial.print(" 0x"); Serial.print(Joystick[i].data[j], HEX);
+    }
   }
   Serial.println();
   Serial.flush();

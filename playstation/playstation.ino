@@ -1,13 +1,16 @@
 #include "Gamepad.h"
 
-#define CMD 3
-#define CLK 5
+#define CMD 2
+#define CLK 3
 
-#define DATA1 2 
-#define ATT1 4
+#define DATA1 4 
+#define ATT1  5
 
 #define DATA2 6
-#define ATT2 8
+#define ATT2  7
+
+//#define DATA3 8
+//#define ATT3  9
 
 #define NUM_PADS 2
 
@@ -19,10 +22,6 @@
 // Additionally serial number is used to differentiate arduino projects to have different button maps!
 const char *gp_serial = "PSX to USB";
 
-//================================================================================
-//================================================================================
-//  Gamepad (Gamepad)
-
 Gamepad_ Gamepad[NUM_PADS];
 
 //================================================================================
@@ -31,8 +30,8 @@ Gamepad_ Gamepad[NUM_PADS];
 void shift(Gamepad_& gamepad, uint8_t _dataOut) {
   gamepad.dataIn = 0;
 
-  for (uint8_t _i = 0; _i < 8; _i++) {
-    if (_dataOut & (1 << _i)) 
+  for (uint8_t i = 0; i < 8; i++) {
+    if (_dataOut & (1 << i)) 
       digitalWrite(CMD, HIGH);
     else 
       digitalWrite(CMD, LOW);
@@ -40,7 +39,7 @@ void shift(Gamepad_& gamepad, uint8_t _dataOut) {
     digitalWrite(CLK, LOW);
     delayMicroseconds(delay);
 
-    if (digitalRead(gamepad.DATA)) gamepad.dataIn |= (1 << _i);
+    if (digitalRead(gamepad.DATA)) gamepad.dataIn |= (1 << i);
 
     digitalWrite(CLK, HIGH);
     delayMicroseconds(delay);
@@ -48,12 +47,12 @@ void shift(Gamepad_& gamepad, uint8_t _dataOut) {
 }
 
 void parallel_shift(uint8_t _dataOut) {
-  for (uint8_t _i = 0; _i < NUM_PADS; _i++) {
-    Gamepad[_i].dataIn = 0;
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    Gamepad[i].dataIn = 0;
   }
 
-  for (uint8_t _j = 0; _j < 8; _j++) {
-    if (_dataOut & (1 << _j)) 
+  for (uint8_t j = 0; j < 8; j++) {
+    if (_dataOut & (1 << j)) 
       digitalWrite(CMD, HIGH);
     else 
       digitalWrite(CMD, LOW);
@@ -61,8 +60,8 @@ void parallel_shift(uint8_t _dataOut) {
     digitalWrite(CLK, LOW);
     delayMicroseconds(delay);
 
-    for (uint8_t _i = 0; _i < NUM_PADS; _i++) {
-      if (digitalRead(Gamepad[_i].DATA)) Gamepad[_i].dataIn |= (1 << _j);
+    for (uint8_t i = 0; i < NUM_PADS; i++) {
+      if (digitalRead(Gamepad[i].DATA)) Gamepad[i].dataIn |= (1 << j);
     }
 
     digitalWrite(CLK, HIGH);
@@ -120,18 +119,55 @@ void enable_analog(Gamepad_& gamepad) {
   delayMicroseconds(1000);
 }
 
+void get_state() {
+  // http://problemkaputt.de/psx-spx.htm#controllerandmemorycardsignals
+  
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    digitalWrite(Gamepad[i].ATT, LOW);
+  }
+
+  parallel_shift(0x01); // Controller Access
+  parallel_shift(0x42); // Receive ID bit0..7
+  for (uint8_t i = 0; i < NUM_PADS; i++) {
+    Gamepad[i].type = Gamepad[i].dataIn;
+    Gamepad[i].analog = (Gamepad[i].type == 0x73 || Gamepad[i].type == 0x53);
+  }
+  parallel_shift(0x00); // Receive ID bit8..15
+
+  // Receive controller state:
+  // j=0: Receive Digital Switches bit0..7  (buttons, inverted)
+  // j=1: Receive Digital Switchis bit8..15 (buttons, inverted)
+  // j=2: Receive Analog Input 0 (right analog X)
+  // j=3: Receive Analog Input 1 (right analog Y)
+  // j=4: Receive Analog Input 2 (left analog X)
+  // j=5: Receive Analog Input 3 (left analog Y)
+  for (uint8_t j = 0; j < 6; j++) {
+    parallel_shift(0x00);
+    for (uint8_t i = 0; i < NUM_PADS; i++) {
+      Gamepad[i].data[j] = (j < 2) ? ~Gamepad[i].dataIn : Gamepad[i].dataIn;
+    }
+  }
+
+  for (uint8_t i = 0; i < NUM_PADS; i++) { 
+    digitalWrite(Gamepad[i].ATT, HIGH);
+  }
+}
+
+//================================================================================
+//================================================================================
+
 void setup() {
   pinMode(CMD, OUTPUT);
   pinMode(CLK, OUTPUT);
   
   Gamepad[0].DATA = DATA1;
-  Gamepad[0].ATT = ATT1;
+  Gamepad[0].ATT  = ATT1;
 
   Gamepad[1].DATA = DATA2;
-  Gamepad[1].ATT = ATT2;
+  Gamepad[1].ATT  = ATT2;
 
   //Gamepad[2].DATA = DATA3;
-  //Gamepad[2].ATT = ATT3;
+  //Gamepad[2].ATT  = ATT3;
 
   for (uint8_t i = 0; i < NUM_PADS; i++) {
     pinMode(Gamepad[i].DATA, INPUT_PULLUP);
@@ -144,33 +180,8 @@ void setup() {
 }
 
 void loop() {
-  // http://problemkaputt.de/psx-spx.htm#controllerandmemorycardsignals
-  
-  for (uint8_t i = 0; i < NUM_PADS; i++) {
-    digitalWrite(Gamepad[i].ATT, LOW);
-  }
-
-  parallel_shift(0x01); // Controller Access
-  parallel_shift(0x42); // Receive ID bit0..7
-  for (uint8_t i = 0; i < NUM_PADS; i++) {
-    Gamepad[i].type = Gamepad[i].dataIn;
-  }
-  parallel_shift(0x00); // Receive ID bit8..15
-
-  for (uint8_t j = 0; j < 6; j++) {                 // Receive controller state:
-    parallel_shift(0x00);                           // j=0: Receive Digital Switches bit0..7  (buttons, inverted)
-    for (uint8_t i = 0; i < NUM_PADS; i++) {        // j=1: Receive Digital Switchis bit8..15 (buttons, inverted)
-      if (j < 2) {                                  // j=2: Receive Analog Input 0 (right analog X)
-        Gamepad[i].data[j] = ~Gamepad[i].dataIn;  // j=3: Receive Analog Input 1 (right analog Y)
-      } else {                                      // j=4: Receive Analog Input 2 (left analog X)
-        Gamepad[i].data[j] = Gamepad[i].dataIn;   // j=5: Receive Analog Input 3 (left analog Y)
-      }
-    }
-  }
-
-  for (uint8_t i = 0; i < NUM_PADS; i++) { 
-    digitalWrite(Gamepad[i].ATT, HIGH);
-  }
+  // Get current button state
+  get_state();
 
   // Check if controller has just been connected (i.e. type not 0xFF)
   // If so, enable analog mode
@@ -181,25 +192,14 @@ void loop() {
     Gamepad[i].connected = (Gamepad[i].type != 0xFF);
   }
 
-  // If no analog sticks available, set stick to neutral
-  for (uint8_t i = 0; i < NUM_PADS; i++) {
-    if (Gamepad[i].type != 0x73 && Gamepad[i].type != 0x53) {
-      for (uint8_t j = 2; j < 6; j++) {
-        Gamepad[i].data[j] = 127;
-      }
-    }
-  }
-
   #ifdef DEBUG
   for (uint8_t i = 0; i < NUM_PADS; i++) {
     Serial.print(" Pad "); Serial.print(i+1); Serial.print(":");
     Serial.print(" type: 0x"); Serial.print(Gamepad[i].type, HEX);
-    Serial.print(" data: 0x"); Serial.print(Gamepad[i].data[0], HEX);
-    Serial.print(" 0x"); Serial.print(Gamepad[i].data[1], HEX);
-    Serial.print(" 0x"); Serial.print(Gamepad[i].data[2], HEX);
-    Serial.print(" 0x"); Serial.print(Gamepad[i].data[3], HEX);
-    Serial.print(" 0x"); Serial.print(Gamepad[i].data[4], HEX);
-    Serial.print(" 0x"); Serial.print(Gamepad[i].data[5], HEX);
+    Serial.print(" data:");
+    for (uint8_t j = 0; j < 6; j++) {
+        Serial.print(" 0x"); Serial.print(Gamepad[i].data[j], HEX);
+    }
   }
   Serial.println();
   Serial.flush();
@@ -207,10 +207,10 @@ void loop() {
 
   for (uint8_t i = 0; i < NUM_PADS; i++) {
     Gamepad[i]._GamepadReport.buttons = (Gamepad[i].data[0]) | (Gamepad[i].data[1] << 8);
-    Gamepad[i]._GamepadReport.right_X = Gamepad[i].data[2];
-    Gamepad[i]._GamepadReport.right_Y = Gamepad[i].data[3];
-    Gamepad[i]._GamepadReport.left_X  = Gamepad[i].data[4];
-    Gamepad[i]._GamepadReport.left_Y  = Gamepad[i].data[5];
+    Gamepad[i]._GamepadReport.right_X = Gamepad[i].analog ? Gamepad[i].data[2] : 127;
+    Gamepad[i]._GamepadReport.right_Y = Gamepad[i].analog ? Gamepad[i].data[3] : 127;
+    Gamepad[i]._GamepadReport.left_X  = Gamepad[i].analog ? Gamepad[i].data[4] : 127;
+    Gamepad[i]._GamepadReport.left_Y  = Gamepad[i].analog ? Gamepad[i].data[5] : 127;
   }
   sendState();
 }

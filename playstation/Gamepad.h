@@ -66,6 +66,7 @@ class Gamepad_ : public PluggableUSBModule
     uint8_t data[JOYSTICK_STATE_SIZE];
     uint8_t dataIn;
     bool connected = false;
+    bool analog = false;
     uint8_t DATA;
     uint8_t ATT;
 };
